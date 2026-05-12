@@ -1,0 +1,6 @@
+@ShopifyProductSync_HostAddress = http://localhost:5215
+
+GET {{ShopifyProductSync_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
