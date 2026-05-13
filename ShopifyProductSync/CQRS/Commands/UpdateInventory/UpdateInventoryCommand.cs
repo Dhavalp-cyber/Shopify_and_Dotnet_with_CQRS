@@ -21,5 +21,6 @@ namespace ShopifyProductSync.CQRS.Commands.UpdateInventory
         public long ShopifyProductId { get; set; }
         public long ShopifyLocationId { get; set; }
         public int UpdatedQuantity { get; set; }
+        public int AvailableQuantityAfterUpdate { get; set; }
     }
 }

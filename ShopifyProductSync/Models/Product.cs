@@ -39,5 +39,8 @@ namespace ShopifyProductSync.Models
 
         // Current inventory quantity at the given location
         public int? InventoryQuantity { get; set; }
+
+        // Navigation property — one Product has many inventory update history records
+        public ICollection<UpdatedInventory> UpdatedInventories { get; set; } = new List<UpdatedInventory>();
     }
 }
