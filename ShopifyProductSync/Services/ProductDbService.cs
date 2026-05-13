@@ -62,5 +62,30 @@ namespace ShopifyProductSync.Services
             return await _context.Products
                 .AnyAsync(p => p.ShopifyProductId == shopifyProductId);
         }
+
+        /// <summary>
+        /// Finds a product by its Shopify inventory item ID.
+        /// Used by the inventory_levels/update webhook to locate the right local record.
+        /// Returns null if not found.
+        /// </summary>
+        public async Task<Product?> GetProductByInventoryItemIdAsync(long inventoryItemId)
+        {
+            return await _context.Products
+                .FirstOrDefaultAsync(p => p.ShopifyInventoryItemId == inventoryItemId);
+        }
+
+        /// <summary>
+        /// Saves changes to an existing product record.
+        /// Used after modifying inventory fields from a webhook.
+        /// </summary>
+        public async Task UpdateProductAsync(Product product)
+        {
+            _context.Products.Update(product);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Product updated in database. LocalId: {Id}, ShopifyId: {ShopifyId}",
+                product.Id, product.ShopifyProductId);
+        }
     }
 }

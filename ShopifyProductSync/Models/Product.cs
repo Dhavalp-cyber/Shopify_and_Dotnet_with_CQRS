@@ -29,5 +29,15 @@ namespace ShopifyProductSync.Models
 
         // "ShopifyWebhook" or "Api"
         public string Source { get; set; } = string.Empty;
+
+        // ── Inventory fields ──────────────────────────────────────────────────
+        // Shopify inventory item ID (maps to a specific variant's inventory)
+        public long? ShopifyInventoryItemId { get; set; }
+
+        // Shopify location ID where inventory is tracked
+        public long? ShopifyLocationId { get; set; }
+
+        // Current inventory quantity at the given location
+        public int? InventoryQuantity { get; set; }
     }
 }

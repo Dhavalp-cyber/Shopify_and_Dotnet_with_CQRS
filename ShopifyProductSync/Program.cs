@@ -35,6 +35,9 @@ builder.Services.AddScoped<ShopifyGraphQLService>();
 builder.Services.AddScoped<ProductDbService>();
 builder.Services.AddScoped<ShopifyWebhookService>();
 
+// 5a. INVENTORY SERVICE (new)
+builder.Services.AddScoped<ShopifyInventoryService>();
+
 // 6. LOGGING
 builder.Services.AddLogging();
 

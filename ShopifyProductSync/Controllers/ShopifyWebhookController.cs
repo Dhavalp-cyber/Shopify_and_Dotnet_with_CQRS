@@ -1,6 +1,9 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using ShopifyProductSync.CQRS.Commands.HandleProductWebhook;
+using ShopifyProductSync.DTOs;
+using ShopifyProductSync.Services;
+using System.Text.Json;
 
 namespace ShopifyProductSync.Controllers
 {
@@ -25,11 +28,19 @@ namespace ShopifyProductSync.Controllers
     {
         private readonly IMediator _mediator;
         private readonly ILogger<ShopifyWebhookController> _logger;
+        private readonly ShopifyWebhookService _webhookService;
+        private readonly ProductDbService _productDbService;
 
-        public ShopifyWebhookController(IMediator mediator, ILogger<ShopifyWebhookController> logger)
+        public ShopifyWebhookController(
+            IMediator mediator,
+            ILogger<ShopifyWebhookController> logger,
+            ShopifyWebhookService webhookService,
+            ProductDbService productDbService)
         {
             _mediator = mediator;
             _logger = logger;
+            _webhookService = webhookService;
+            _productDbService = productDbService;
         }
 
         /// <summary>
@@ -88,6 +99,92 @@ namespace ShopifyProductSync.Controllers
             {
                 _logger.LogError(ex, "Unexpected error processing webhook.");
                 // Return 200 anyway to prevent Shopify from retrying endlessly
+                return Ok(new { message = "Webhook received but processing failed internally." });
+            }
+        }
+
+        /// <summary>
+        /// Receives Shopify inventory_levels/update webhook.
+        /// Shopify sends this automatically whenever inventory is updated at any location.
+        /// This keeps our local database in sync with Shopify inventory.
+        ///
+        /// Register this webhook in Shopify Admin:
+        ///   Topic: inventory_levels/update
+        ///   URL:   https://your-domain/api/shopify/webhooks/inventory-update
+        /// </summary>
+        [HttpPost("inventory-update")]
+        public async Task<IActionResult> InventoryUpdated()
+        {
+            _logger.LogInformation("Received Shopify inventory_levels/update webhook.");
+
+            // Read raw body bytes first (needed for HMAC verification)
+            byte[] rawBodyBytes;
+            using (var memoryStream = new MemoryStream())
+            {
+                await Request.Body.CopyToAsync(memoryStream);
+                rawBodyBytes = memoryStream.ToArray();
+            }
+
+            var hmacHeader = Request.Headers["X-Shopify-Hmac-Sha256"].FirstOrDefault() ?? string.Empty;
+
+            // Verify HMAC signature
+            if (!_webhookService.IsValidWebhook(rawBodyBytes, hmacHeader))
+            {
+                _logger.LogWarning("Invalid HMAC on inventory webhook. Rejecting.");
+                return Unauthorized(new { message = "Invalid HMAC signature." });
+            }
+
+            try
+            {
+                var rawBodyString = System.Text.Encoding.UTF8.GetString(rawBodyBytes);
+
+                var payload = JsonSerializer.Deserialize<ShopifyInventoryWebhookDto>(rawBodyString);
+
+                if (payload == null || payload.InventoryItemId == 0)
+                {
+                    _logger.LogWarning("Could not parse inventory webhook body.");
+                    return Ok(new { message = "Webhook received but payload was invalid." });
+                }
+
+                _logger.LogInformation(
+                    "Inventory webhook — InventoryItemId: {ItemId}, LocationId: {LocationId}, Available: {Qty}",
+                    payload.InventoryItemId, payload.LocationId, payload.Available);
+
+                // Find the product in local DB by inventory item ID
+                var product = await _productDbService.GetProductByInventoryItemIdAsync(payload.InventoryItemId);
+
+                if (product == null)
+                {
+                    // Product not yet tracked locally — nothing to update
+                    _logger.LogInformation(
+                        "No local product found for InventoryItemId: {ItemId}. Skipping DB update.",
+                        payload.InventoryItemId);
+                    return Ok(new { message = "Inventory webhook received. Product not tracked locally." });
+                }
+
+                // Update inventory fields in local DB
+                product.InventoryQuantity = payload.Available;
+                product.ShopifyInventoryItemId = payload.InventoryItemId;
+                product.ShopifyLocationId = payload.LocationId;
+                product.UpdatedAt = DateTime.UtcNow;
+
+                await _productDbService.UpdateProductAsync(product);
+
+                _logger.LogInformation(
+                    "Local DB inventory updated via webhook — ShopifyProductId: {ProductId}, " +
+                    "InventoryQuantity: {Qty}, LocationId: {LocationId}",
+                    product.ShopifyProductId, payload.Available, payload.LocationId);
+
+                return Ok(new { message = "Inventory webhook processed and local database updated." });
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Failed to parse inventory webhook JSON.");
+                return Ok(new { message = "Webhook received but JSON parsing failed." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error processing inventory webhook.");
                 return Ok(new { message = "Webhook received but processing failed internally." });
             }
         }
