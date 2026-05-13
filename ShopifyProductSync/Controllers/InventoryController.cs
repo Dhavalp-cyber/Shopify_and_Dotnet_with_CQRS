@@ -70,7 +70,8 @@ namespace ShopifyProductSync.Controllers
                     message = result.Message,
                     shopifyProductId = result.ShopifyProductId,
                     shopifyLocationId = result.ShopifyLocationId,
-                    updatedQuantity = result.UpdatedQuantity
+                    updatedQuantity = result.UpdatedQuantity,
+                    availableQuantityAfterUpdate = result.AvailableQuantityAfterUpdate
                 });
             }
             catch (KeyNotFoundException ex)

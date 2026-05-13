@@ -37,6 +37,69 @@ namespace ShopifyProductSync.Services
         }
 
         /// <summary>
+        /// Fetches the location name from Shopify for a given location ID.
+        /// Uses the Shopify REST Admin API (simpler and more reliable than GraphQL for locations).
+        /// Returns "Unknown Location" only if Shopify genuinely cannot return the name.
+        /// </summary>
+        public async Task<string> GetLocationNameAsync(long shopifyLocationId)
+        {
+            _logger.LogInformation("Fetching location name for LocationId: {LocationId}", shopifyLocationId);
+
+            try
+            {
+                var shopUrl = _graphqlEndpoint.Replace("/admin/api/2024-01/graphql.json", "");
+                var restEndpoint = $"{shopUrl}/admin/api/2024-01/locations/{shopifyLocationId}.json";
+
+                var client = _httpClientFactory.CreateClient("ShopifyGraphQL");
+                var request = new HttpRequestMessage(HttpMethod.Get, restEndpoint);
+                request.Headers.Add("X-Shopify-Access-Token", _accessToken);
+
+                var httpResponse = await client.SendAsync(request);
+                var responseBody = await httpResponse.Content.ReadAsStringAsync();
+
+                _logger.LogInformation(
+                    "Shopify location REST response — Status: {Status}, Body: {Body}",
+                    httpResponse.StatusCode, responseBody);
+
+                if (!httpResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning(
+                        "Shopify location REST returned {Status} for LocationId: {LocationId}. Body: {Body}",
+                        httpResponse.StatusCode, shopifyLocationId, responseBody);
+                    return "Unknown Location";
+                }
+
+                // REST response: { "location": { "id": 123, "name": "Main Warehouse", ... } }
+                using var doc = JsonDocument.Parse(responseBody);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("location", out var locationNode) &&
+                    locationNode.TryGetProperty("name", out var nameNode))
+                {
+                    var name = nameNode.GetString();
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        _logger.LogInformation(
+                            "Location name fetched successfully — LocationId: {LocationId}, Name: {Name}",
+                            shopifyLocationId, name);
+                        return name;
+                    }
+                }
+
+                _logger.LogWarning(
+                    "Location name not found in Shopify response for LocationId: {LocationId}. Response: {Body}",
+                    shopifyLocationId, responseBody);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Exception while fetching location name for LocationId: {LocationId}", shopifyLocationId);
+            }
+
+            return "Unknown Location";
+        }
+
+        /// <summary>
         /// Fetches the inventory item ID for the first variant of a Shopify product.
         /// Shopify ties inventory to variants, not products directly.
         /// Throws if the product or inventory item is not found.
@@ -106,9 +169,10 @@ namespace ShopifyProductSync.Services
         /// <summary>
         /// Sets the absolute inventory quantity for the given inventory item
         /// at the given Shopify location using the inventorySetQuantities GraphQL mutation.
+        /// Returns the actual available quantity after the update.
         /// Throws an exception if the Shopify API call fails.
         /// </summary>
-        public async Task UpdateInventoryAsync(
+        public async Task<int> UpdateInventoryAsync(
             long inventoryItemId,
             long locationId,
             int quantity)
@@ -179,9 +243,44 @@ namespace ShopifyProductSync.Services
                 throw new Exception($"Shopify inventory userErrors: {errorMessages}");
             }
 
+            // Extract quantityAfterChange from the response
+            // Navigate: data → inventorySetQuantities → inventoryAdjustmentGroup → changes[0] → quantityAfterChange
+            int availableAfterUpdate = quantity; // fallback to requested quantity
+            try
+            {
+                var changes = root
+                    .GetProperty("data")
+                    .GetProperty("inventorySetQuantities")
+                    .GetProperty("inventoryAdjustmentGroup")
+                    .GetProperty("changes");
+
+                if (changes.GetArrayLength() > 0)
+                {
+                    // Find the "available" change entry
+                    foreach (var change in changes.EnumerateArray())
+                    {
+                        if (change.TryGetProperty("name", out var name) &&
+                            name.GetString() == "available" &&
+                            change.TryGetProperty("quantityAfterChange", out var qtyAfter))
+                        {
+                            availableAfterUpdate = qtyAfter.GetInt32();
+                            break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // If parsing fails, fall back to the requested quantity
+                availableAfterUpdate = quantity;
+            }
+
             _logger.LogInformation(
-                "Shopify inventory update success — InventoryItemId: {ItemId}, LocationId: {LocationId}, Quantity: {Qty}",
-                inventoryItemId, locationId, quantity);
+                "Shopify inventory update success — InventoryItemId: {ItemId}, LocationId: {LocationId}, " +
+                "Quantity: {Qty}, AvailableAfter: {Available}",
+                inventoryItemId, locationId, quantity, availableAfterUpdate);
+
+            return availableAfterUpdate;
         }
 
         /// <summary>
