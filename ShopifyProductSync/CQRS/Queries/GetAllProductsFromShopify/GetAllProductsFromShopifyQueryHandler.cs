@@ -31,6 +31,7 @@ namespace ShopifyProductSync.CQRS.Queries.GetAllProductsFromShopify
 
             var products = await _shopifyGraphQLService.GetAllProductsAsync();
 
+            //data send to midiator send() method
             return new GetAllProductsFromShopifyResult
             {
                 TotalCount = products.Count,

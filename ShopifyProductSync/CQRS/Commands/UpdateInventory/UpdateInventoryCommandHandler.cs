@@ -49,7 +49,7 @@ namespace ShopifyProductSync.CQRS.Commands.UpdateInventory
                 command.ShopifyLocationId,
                 command.Quantity);
 
-            // ── Step 1: Find product in local DB ─────────────────────────────
+            // Find product in local DB 
             var product = await _db.Products
                 .FirstOrDefaultAsync(p => p.ShopifyProductId == command.ShopifyProductId, cancellationToken);
 
@@ -87,21 +87,21 @@ namespace ShopifyProductSync.CQRS.Commands.UpdateInventory
                     command.ShopifyProductId, product.Id);
             }
 
-            // ── Step 2: Get inventory item ID from Shopify ───────────────────
+            // Get inventory item ID from Shopify 
             var inventoryItemId = await _inventoryService.GetInventoryItemIdAsync(command.ShopifyProductId);
 
             _logger.LogInformation(
                 "Resolved InventoryItemId: {ItemId} for ShopifyProductId: {ProductId}",
                 inventoryItemId, command.ShopifyProductId);
 
-            // ── Step 3: Update inventory in Shopify ──────────────────────────
+            // Update inventory in Shopify 
             // Returns the actual available quantity after the update
             var availableAfterUpdate = await _inventoryService.UpdateInventoryAsync(
                 inventoryItemId,
                 command.ShopifyLocationId,
                 command.Quantity);
 
-            // ── Step 4: Update product inventory fields in local DB ──────────
+            //  Update product inventory fields in local DB 
             product.ShopifyInventoryItemId = inventoryItemId;
             product.ShopifyLocationId = command.ShopifyLocationId;
             product.InventoryQuantity = availableAfterUpdate;
@@ -114,7 +114,7 @@ namespace ShopifyProductSync.CQRS.Commands.UpdateInventory
                 "InventoryQuantity: {Qty}",
                 command.ShopifyProductId, availableAfterUpdate);
 
-            // ── Step 5: Find or create Location record ───────────────────────
+            // Find or create Location record 
             var location = await _db.Locations
                 .FirstOrDefaultAsync(l => l.ShopifyLocationId == command.ShopifyLocationId, cancellationToken);
 
@@ -160,6 +160,7 @@ namespace ShopifyProductSync.CQRS.Commands.UpdateInventory
                 LocationId = location.Id,
                 // Snapshot values — saved at update time so history is preserved
                 // even if product name or location name changes later in Shopify
+                ShopifyProductId = product.ShopifyProductId,
                 ProductName = product.Title,
                 ShopifyLocationId = command.ShopifyLocationId,
                 LocationName = location.LocationName,

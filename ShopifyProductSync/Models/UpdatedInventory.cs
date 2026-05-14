@@ -28,6 +28,9 @@ namespace ShopifyProductSync.Models
 
         // ── Snapshot values (saved at update time) ────────────────────────────
 
+        // Shopify product ID at the time of this update
+        public long ShopifyProductId { get; set; }
+
         // Product name at the time of this update
         public string ProductName { get; set; } = string.Empty;
 

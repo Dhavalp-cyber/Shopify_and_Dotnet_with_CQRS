@@ -50,6 +50,7 @@ namespace ShopifyProductSync.Services
             _logger.LogInformation("Starting GraphQL product fetch from Shopify...");
 
             //still ittration if pages available
+            // in one request shopify return maximum 250 product thats why use loop
             while (hasNextPage)
             {
                 _logger.LogInformation("Fetching page {Page} from Shopify GraphQL...", pageNumber);
@@ -125,10 +126,8 @@ namespace ShopifyProductSync.Services
             return MapToResponseDto(response.Data.Product);
         }
 
-        /// <summary>
-        /// Builds the GraphQL query string.
-        /// If cursor is provided, adds "after: cursor" for pagination.
-        /// </summary>
+    
+
         private string BuildProductsQuery(string? cursor)
         {
             // Build the "after" argument only when we have a cursor (page 2+)
