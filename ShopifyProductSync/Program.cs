@@ -39,7 +39,7 @@ builder.Services.AddScoped<ShopifyWebhookService>();
 // 5a. INVENTORY SERVICE (new)
 builder.Services.AddScoped<ShopifyInventoryService>();
 
-// 5b. FULFILLMENT SERVICE
+// 5b. FULFILLMENT SERVICE (new)
 builder.Services.Configure<ShopifySettings>(
     builder.Configuration.GetSection(ShopifySettings.SectionName));
 builder.Services.AddScoped<ShopifyFulfillmentService>();
