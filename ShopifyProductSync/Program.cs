@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ShopifyProductSync;
+using ShopifyProductSync.Configuration;
 using ShopifyProductSync.Data;
 using ShopifyProductSync.Services;
 
@@ -37,6 +38,14 @@ builder.Services.AddScoped<ShopifyWebhookService>();
 
 // 5a. INVENTORY SERVICE (new)
 builder.Services.AddScoped<ShopifyInventoryService>();
+
+// 5b. FULFILLMENT SERVICE
+builder.Services.Configure<ShopifySettings>(
+    builder.Configuration.GetSection(ShopifySettings.SectionName));
+builder.Services.AddScoped<ShopifyFulfillmentService>();
+
+// 5c. ORDER SERVICE — fetches unfulfilled/partial orders from Shopify
+builder.Services.AddScoped<ShopifyOrderService>();
 
 // 6. LOGGING
 builder.Services.AddLogging();
