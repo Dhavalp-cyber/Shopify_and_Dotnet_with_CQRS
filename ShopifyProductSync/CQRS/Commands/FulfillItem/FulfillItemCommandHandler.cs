@@ -9,14 +9,15 @@ namespace ShopifyProductSync.CQRS.Commands.FulfillItem
     /// <summary>
     /// Handles FulfillItemCommand.
     ///
-    /// Single-item fulfillment flow:
+    /// Fulfillment flow:
     ///   1. Validate carrier name against AllowedTrackingCarriers from appsettings.json.
     ///   2. Fetch the Shopify order to verify it exists.
     ///   3. Check the order is not already fully fulfilled.
-    ///   4. Call FulfillSingleItemAsync with the exact FulfillmentOrderLineItemId.
+    ///   4. Call FulfillMultipleItemsAsync — sends ONE Shopify GraphQL call
+    ///      regardless of how many items are in the request.
     ///   5. Return success result with fulfillment details.
     ///
-    /// Does NOT fulfill the entire order — only the specified line item.
+    /// Does NOT fulfill the entire order — only the specified line items.
     /// </summary>
     public class FulfillItemCommandHandler : IRequestHandler<FulfillItemCommand, FulfillItemResult>
     {
@@ -40,11 +41,8 @@ namespace ShopifyProductSync.CQRS.Commands.FulfillItem
         {
             _logger.LogInformation(
                 "FulfillItem request received — OrderId: {OrderId}, " +
-                "FulfillmentOrderId: {FoId}, FulfillmentOrderLineItemId: {FoliId}, " +
-                "Quantity: {Qty}, Carrier: {Carrier}",
-                command.OrderId, command.FulfillmentOrderId,
-                command.FulfillmentOrderLineItemId, command.Quantity,
-                command.ShippingCarrierName);
+                "ItemCount: {Count}, Carrier: {Carrier}",
+                command.OrderId, command.Items.Count, command.ShippingCarrierName);
 
             // ── Step 1: Validate carrier name against allowed list ────────────
             var isCarrierValid = _settings.AllowedTrackingCarriers
@@ -77,7 +75,6 @@ namespace ShopifyProductSync.CQRS.Commands.FulfillItem
                 command.OrderId, order.FulfillmentStatus ?? "null");
 
             // ── Step 3: Check if the entire order is already fulfilled ────────
-            // If the order is fully fulfilled, no items can be fulfilled further.
             if (order.FulfillmentStatus?.Equals("fulfilled", StringComparison.OrdinalIgnoreCase) == true)
             {
                 _logger.LogWarning(
@@ -85,23 +82,23 @@ namespace ShopifyProductSync.CQRS.Commands.FulfillItem
                 return new FulfillItemResult { Message = "Order is already fully fulfilled." };
             }
 
-            // ── Step 4: Fulfill only the specified line item via GraphQL ──────
-            // FulfillSingleItemAsync uses lineItemsByFulfillmentOrder with
-            // fulfillmentOrderLineItems to target exactly one item.
-            // Throws InvalidOperationException if Shopify returns userErrors
-            // (e.g. item already fulfilled, invalid quantity, carrier rejected).
-            var fulfillmentId = await _fulfillmentService.FulfillSingleItemAsync(
-                command.FulfillmentOrderId,
-                command.FulfillmentOrderLineItemId,
-                command.Quantity,
+            // ── Step 4: Fulfill all specified items in ONE Shopify API call ───
+            // FulfillMultipleItemsAsync groups items by fulfillmentOrderId and sends
+            // a single fulfillmentCreate mutation — no matter how many items are selected.
+            var lineItems = command.Items
+                .Select(i => (i.FulfillmentOrderId, i.FulfillmentOrderLineItemId, i.Quantity))
+                .ToList();
+
+            var fulfillmentId = await _fulfillmentService.FulfillMultipleItemsAsync(
+                lineItems,
                 command.TrackingNumber,
                 command.ShippingCarrierName,
                 command.NotifyCustomer);
 
             _logger.LogInformation(
-                "Item fulfilled successfully — OrderId: {OrderId}, " +
-                "FulfillmentId: {FulfillmentId}, FulfillmentOrderLineItemId: {FoliId}",
-                command.OrderId, fulfillmentId, command.FulfillmentOrderLineItemId);
+                "Items fulfilled successfully — OrderId: {OrderId}, " +
+                "FulfillmentId: {FulfillmentId}, ItemCount: {Count}",
+                command.OrderId, fulfillmentId, command.Items.Count);
 
             // ── Step 5: Return success result ─────────────────────────────────
             return new FulfillItemResult

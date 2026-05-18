@@ -485,6 +485,116 @@ namespace ShopifyProductSync.Services
         }
 
         /// <summary>
+        /// Fulfills multiple specific line items from a Shopify order in ONE GraphQL call.
+        /// Items are grouped by fulfillmentOrderId inside lineItemsByFulfillmentOrder.
+        /// If all items share the same fulfillmentOrderId, one group is created.
+        /// If items span multiple fulfillmentOrderIds, multiple groups are created —
+        /// but still sent as a single fulfillmentCreate mutation.
+        ///
+        /// Returns the numeric fulfillment ID on success.
+        /// Throws InvalidOperationException if Shopify returns userErrors.
+        /// </summary>
+        public async Task<long> FulfillMultipleItemsAsync(
+            List<(long FulfillmentOrderId, long FulfillmentOrderLineItemId, int Quantity)> items,
+            string trackingNumber,
+            string shippingCarrierName,
+            bool notifyCustomer)
+        {
+            _logger.LogInformation(
+                "FulfillMultipleItems — ItemCount: {Count}, Carrier: {Carrier}, " +
+                "TrackingNumber: {Tracking}",
+                items.Count, shippingCarrierName, trackingNumber);
+
+            // Group items by fulfillmentOrderId so each group becomes one entry
+            // in lineItemsByFulfillmentOrder. This is the key fix — one Shopify call
+            // regardless of how many items or fulfillment orders are involved.
+            var groups = items
+                .GroupBy(i => i.FulfillmentOrderId)
+                .Select(g => new
+                {
+                    fulfillmentOrderId = $"gid://shopify/FulfillmentOrder/{g.Key}",
+                    fulfillmentOrderLineItems = g.Select(i => new
+                    {
+                        id = $"gid://shopify/FulfillmentOrderLineItem/{i.FulfillmentOrderLineItemId}",
+                        quantity = i.Quantity
+                    }).ToArray()
+                })
+                .ToArray();
+
+            var mutation = new
+            {
+                query = @"mutation fulfillmentCreate($fulfillment: FulfillmentInput!) {
+                    fulfillmentCreate(fulfillment: $fulfillment) {
+                        fulfillment {
+                            id
+                            status
+                            trackingInfo {
+                                number
+                                company
+                            }
+                        }
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }",
+                variables = new
+                {
+                    fulfillment = new
+                    {
+                        notifyCustomer,
+                        trackingInfo = new
+                        {
+                            number = trackingNumber,
+                            company = shippingCarrierName
+                        },
+                        lineItemsByFulfillmentOrder = groups
+                    }
+                }
+            };
+
+            var responseBody = await SendGraphQLRequestAsync(JsonSerializer.Serialize(mutation));
+
+            using var doc = JsonDocument.Parse(responseBody);
+            var root = doc.RootElement;
+
+            // Check for mutation-level userErrors
+            if (root.TryGetProperty("data", out var data) &&
+                data.TryGetProperty("fulfillmentCreate", out var fulfillmentCreate) &&
+                fulfillmentCreate.TryGetProperty("userErrors", out var userErrors) &&
+                userErrors.GetArrayLength() > 0)
+            {
+                var errorMessages = string.Join("; ",
+                    userErrors.EnumerateArray()
+                              .Select(e => e.GetProperty("message").GetString()));
+
+                _logger.LogError(
+                    "Shopify fulfillmentCreate userErrors — {Errors}", errorMessages);
+
+                throw new InvalidOperationException(
+                    $"Shopify fulfillmentCreate failed: {errorMessages}");
+            }
+
+            // Extract the fulfillment GID and parse numeric ID
+            var fulfillmentGid = root
+                .GetProperty("data")
+                .GetProperty("fulfillmentCreate")
+                .GetProperty("fulfillment")
+                .GetProperty("id")
+                .GetString() ?? string.Empty;
+
+            var fulfillmentId = ParseGidToLong(fulfillmentGid);
+
+            _logger.LogInformation(
+                "Multiple items fulfilled successfully in one call — " +
+                "FulfillmentId: {FulfillmentId}, ItemCount: {Count}",
+                fulfillmentId, items.Count);
+
+            return fulfillmentId;
+        }
+
+        /// <summary>
         /// Fulfills ONE specific line item from a Shopify order using the GraphQL
         /// fulfillmentCreate mutation with lineItemsByFulfillmentOrder.
         ///

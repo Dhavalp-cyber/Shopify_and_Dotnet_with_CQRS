@@ -15,14 +15,20 @@ namespace ShopifyProductSync.CQRS.Commands.FulfillItem
             RuleFor(x => x.OrderId)
                 .GreaterThan(0).WithMessage("OrderId is required and must be a positive number.");
 
-            RuleFor(x => x.FulfillmentOrderId)
-                .GreaterThan(0).WithMessage("FulfillmentOrderId is required and must be a positive number.");
+            RuleFor(x => x.Items)
+                .NotEmpty().WithMessage("At least one item is required.");
 
-            RuleFor(x => x.FulfillmentOrderLineItemId)
-                .GreaterThan(0).WithMessage("FulfillmentOrderLineItemId is required and must be a positive number.");
+            RuleForEach(x => x.Items).ChildRules(item =>
+            {
+                item.RuleFor(i => i.FulfillmentOrderId)
+                    .GreaterThan(0).WithMessage("FulfillmentOrderId is required and must be a positive number.");
 
-            RuleFor(x => x.Quantity)
-                .GreaterThan(0).WithMessage("Quantity must be greater than 0.");
+                item.RuleFor(i => i.FulfillmentOrderLineItemId)
+                    .GreaterThan(0).WithMessage("FulfillmentOrderLineItemId is required and must be a positive number.");
+
+                item.RuleFor(i => i.Quantity)
+                    .GreaterThan(0).WithMessage("Quantity must be greater than 0.");
+            });
 
             RuleFor(x => x.TrackingNumber)
                 .NotEmpty().WithMessage("TrackingNumber is required.");

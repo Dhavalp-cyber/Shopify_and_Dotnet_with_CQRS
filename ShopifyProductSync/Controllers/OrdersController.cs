@@ -141,20 +141,15 @@ namespace ShopifyProductSync.Controllers
 
             _logger.LogInformation(
                 "POST /api/orders/fulfill-item — OrderId: {OrderId}, " +
-                "FulfillmentOrderId: {FoId}, FulfillmentOrderLineItemId: {FoliId}, " +
-                "Quantity: {Qty}, Carrier: {Carrier}",
-                request.OrderId, request.FulfillmentOrderId,
-                request.FulfillmentOrderLineItemId, request.Quantity,
-                request.ShippingCarrierName);
+                "ItemCount: {Count}, Carrier: {Carrier}",
+                request.OrderId, request.Items.Count, request.ShippingCarrierName);
 
             try
             {
                 var command = new FulfillItemCommand
                 {
                     OrderId = request.OrderId,
-                    FulfillmentOrderId = request.FulfillmentOrderId,
-                    FulfillmentOrderLineItemId = request.FulfillmentOrderLineItemId,
-                    Quantity = request.Quantity,
+                    Items = request.Items,
                     TrackingNumber = request.TrackingNumber,
                     ShippingCarrierName = request.ShippingCarrierName,
                     NotifyCustomer = request.NotifyCustomer
@@ -185,17 +180,15 @@ namespace ShopifyProductSync.Controllers
             {
                 // Shopify userErrors — item already fulfilled, invalid quantity, etc.
                 _logger.LogWarning(ex,
-                    "Shopify rejected fulfill-item — OrderId: {OrderId}, " +
-                    "FulfillmentOrderLineItemId: {FoliId}",
-                    request.OrderId, request.FulfillmentOrderLineItemId);
+                    "Shopify rejected fulfill-item — OrderId: {OrderId}",
+                    request.OrderId);
                 return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Error fulfilling item — OrderId: {OrderId}, " +
-                    "FulfillmentOrderLineItemId: {FoliId}",
-                    request.OrderId, request.FulfillmentOrderLineItemId);
+                    "Error fulfilling item — OrderId: {OrderId}",
+                    request.OrderId);
                 return StatusCode(500, new { message = "Failed to fulfill item: " + ex.Message });
             }
         }
