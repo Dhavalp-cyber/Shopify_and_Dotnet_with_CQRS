@@ -23,6 +23,10 @@ namespace ShopifyProductSync.Data
         // New table — stores inventory update history
         public DbSet<UpdatedInventory> UpdatedInventories { get; set; }
 
+        // Order notes feature — stores orders and their note_attributes locally
+        public DbSet<Order> Orders { get; set; }
+        public DbSet<OrderNoteAttribute> OrderNoteAttributes { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -73,6 +77,31 @@ namespace ShopifyProductSync.Data
                 entity.HasOne(u => u.Location)
                       .WithMany(l => l.UpdatedInventories)
                       .HasForeignKey(u => u.LocationId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+            // ── Order + OrderNoteAttribute ────────────────────────────────────
+            modelBuilder.Entity<Order>(entity =>
+            {
+                entity.HasKey(o => o.Id);
+
+                // ShopifyOrderId must be unique — one local row per Shopify order
+                entity.HasIndex(o => o.ShopifyOrderId).IsUnique();
+
+                entity.Property(o => o.OrderName).IsRequired().HasMaxLength(50);
+                entity.Property(o => o.Note).HasMaxLength(5000);
+            });
+
+            modelBuilder.Entity<OrderNoteAttribute>(entity =>
+            {
+                entity.HasKey(a => a.Id);
+
+                entity.Property(a => a.Name).IsRequired().HasMaxLength(255);
+                entity.Property(a => a.Value).IsRequired().HasMaxLength(5000);
+
+                // Relation: many OrderNoteAttributes → one Order
+                entity.HasOne(a => a.Order)
+                      .WithMany(o => o.NoteAttributes)
+                      .HasForeignKey(a => a.OrderId)
                       .OnDelete(DeleteBehavior.Cascade);
             });
         }

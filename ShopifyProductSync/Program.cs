@@ -27,6 +27,10 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+// Register IAppDbContext → AppDbContext for CQRS handlers
+builder.Services.AddScoped<ShopifyProductSync.CQRS.Common.Interfaces.IAppDbContext>(
+    sp => sp.GetRequiredService<AppDbContext>());
+
 // 4. HTTP CLIENT
 builder.Services.AddHttpClient("ShopifyGraphQL");
 

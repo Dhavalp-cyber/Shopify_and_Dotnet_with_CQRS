@@ -405,6 +405,86 @@ namespace ShopifyProductSync.Services
         }
 
         /// <summary>
+        /// Updates the note and note_attributes on a Shopify order using the
+        /// GraphQL orderUpdate mutation.
+        /// Sends the complete merged list of note_attributes (Shopify replaces, not appends).
+        /// Throws InvalidOperationException if Shopify returns userErrors.
+        /// </summary>
+        public async Task UpdateOrderNoteAsync(
+            long shopifyOrderId,
+            string? note,
+            List<(string Name, string Value)> noteAttributes)
+        {
+            _logger.LogInformation(
+                "Updating order note via GraphQL — ShopifyOrderId: {OrderId}, " +
+                "AttributeCount: {Count}",
+                shopifyOrderId, noteAttributes.Count);
+
+            var orderGid = $"gid://shopify/Order/{shopifyOrderId}";
+
+            // Build the note_attributes array for the mutation variables
+            var attributeObjects = noteAttributes
+                .Select(a => new { key = a.Name, value = a.Value })
+                .ToArray();
+
+            var mutation = new
+            {
+                query = @"mutation orderUpdate($input: OrderInput!) {
+                    orderUpdate(input: $input) {
+                        order {
+                            id
+                            note
+                            customAttributes {
+                                key
+                                value
+                            }
+                        }
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }",
+                variables = new
+                {
+                    input = new
+                    {
+                        id = orderGid,
+                        note = note ?? string.Empty,
+                        customAttributes = attributeObjects
+                    }
+                }
+            };
+
+            var responseBody = await SendGraphQLRequestAsync(JsonSerializer.Serialize(mutation));
+
+            using var doc = JsonDocument.Parse(responseBody);
+            var root = doc.RootElement;
+
+            // Check for mutation-level userErrors
+            if (root.TryGetProperty("data", out var data) &&
+                data.TryGetProperty("orderUpdate", out var orderUpdate) &&
+                orderUpdate.TryGetProperty("userErrors", out var userErrors) &&
+                userErrors.GetArrayLength() > 0)
+            {
+                var errorMessages = string.Join("; ",
+                    userErrors.EnumerateArray()
+                              .Select(e => e.GetProperty("message").GetString()));
+
+                _logger.LogError(
+                    "Shopify orderUpdate userErrors — ShopifyOrderId: {OrderId}: {Errors}",
+                    shopifyOrderId, errorMessages);
+
+                throw new InvalidOperationException(
+                    $"Shopify orderUpdate failed: {errorMessages}");
+            }
+
+            _logger.LogInformation(
+                "Order note updated successfully in Shopify — ShopifyOrderId: {OrderId}",
+                shopifyOrderId);
+        }
+
+        /// <summary>
         /// Fulfills ONE specific line item from a Shopify order using the GraphQL
         /// fulfillmentCreate mutation with lineItemsByFulfillmentOrder.
         ///

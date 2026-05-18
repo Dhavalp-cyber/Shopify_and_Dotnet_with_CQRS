@@ -1,8 +1,10 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using ShopifyProductSync.CQRS.Commands.AddOrderNoteAttributes;
 using ShopifyProductSync.CQRS.Commands.FulfillItem;
 using ShopifyProductSync.CQRS.Commands.FulfillOrder;
 using ShopifyProductSync.CQRS.Queries.GetAllOrders;
+using ShopifyProductSync.CQRS.Queries.GetOrderNote;
 using ShopifyProductSync.CQRS.Queries.GetUnfulfilledOrders;
 using ShopifyProductSync.DTOs;
 
@@ -195,6 +197,94 @@ namespace ShopifyProductSync.Controllers
                     "FulfillmentOrderLineItemId: {FoliId}",
                     request.OrderId, request.FulfillmentOrderLineItemId);
                 return StatusCode(500, new { message = "Failed to fulfill item: " + ex.Message });
+            }
+        }
+        /// <summary>
+        /// Fetches the note and note_attributes for a Shopify order from the local database.
+        /// Returns 404 if the order has not been synced locally yet —
+        /// use POST /api/orders/{orderId}/note-attributes to create it first.
+        /// </summary>
+        [HttpGet("{orderId}/note")]
+        public async Task<IActionResult> GetOrderNote(string orderId)
+        {
+            _logger.LogInformation(
+                "GET /api/orders/{OrderId}/note", orderId);
+
+            try
+            {
+                var result = await _mediator.Send(new GetOrderNoteQuery { OrderId = orderId });
+
+                if (result == null)
+                    return NotFound(new
+                    {
+                        message = $"Order '{orderId}' not found locally. " +
+                                  "POST to /api/orders/{orderId}/note-attributes to sync it first."
+                    });
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching order note — OrderId: {OrderId}", orderId);
+                return StatusCode(500, new { message = "Failed to fetch order note: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Appends note_attributes to a Shopify order and optionally updates the note text.
+        /// Additive: existing attributes are preserved; new keys are inserted; existing keys updated.
+        /// Syncs the merged result to Shopify via the orderUpdate GraphQL mutation.
+        ///
+        /// Example request body:
+        /// {
+        ///   "note": "Handle with care",
+        ///   "noteAttributes": [
+        ///     { "name": "gift_message", "value": "Happy Birthday!" },
+        ///     { "name": "source",       "value": "mobile_app" }
+        ///   ]
+        /// }
+        /// </summary>
+        [HttpPost("{orderId}/note-attributes")]
+        public async Task<IActionResult> AddOrderNoteAttributes(
+            string orderId,
+            [FromBody] AddOrderNoteAttributesRequest request)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            _logger.LogInformation(
+                "POST /api/orders/{OrderId}/note-attributes — AttributeCount: {Count}",
+                orderId, request.NoteAttributes.Count);
+
+            try
+            {
+                var command = new AddOrderNoteAttributesCommand
+                {
+                    OrderId = orderId,
+                    Note = request.Note,
+                    NoteAttributes = request.NoteAttributes
+                };
+
+                var result = await _mediator.Send(command);
+
+                return Ok(new
+                {
+                    message = result.Message,
+                    order = result.Order
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Shopify userErrors — e.g. order not found in Shopify, invalid attributes
+                _logger.LogWarning(ex,
+                    "Shopify rejected note-attributes update — OrderId: {OrderId}", orderId);
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error updating order note attributes — OrderId: {OrderId}", orderId);
+                return StatusCode(500, new { message = "Failed to update note attributes: " + ex.Message });
             }
         }
     }
